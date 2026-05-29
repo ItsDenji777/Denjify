@@ -1,0 +1,16 @@
+{
+  "name": "denjify",
+  "version": "1.0.0",
+  "description": "a Spotify like offline-based music player",
+  "keywords": [
+    "spotify"
+  ],
+  "license": "MIT",
+  "author": "Kasra Seydi",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "cache-lyrics": "node backend/utils/cacheLyrics.js"
+  }
+}
