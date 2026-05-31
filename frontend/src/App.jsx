@@ -6,6 +6,7 @@ import LyricsScreen from './components/LyricsScreen.jsx';
 import { fetchTracks, fetchPlaylists } from './services/api.js';
 import { prefetchLyrics } from './services/lyrics.js';
 import { Howl } from 'howler';
+import discordRPC from './services/discordRPC.js';
 
 let currentSound = null;
 let progressInterval = null;
@@ -33,6 +34,11 @@ function resumeAudioContext() {
 
 export default function App() {
   const [allTracks, setAllTracks] = useState([]);
+
+  useEffect(() => {
+    discordRPC.connect();
+  }, []);
+
   const [playlists, setPlaylists] = useState([]);
   const [currentView, setCurrentView] = useState('home');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
@@ -101,6 +107,66 @@ export default function App() {
     ? allTracks.find(t => t.id === queue[currentIndex])
     : null;
 
+  useEffect(() => {
+    if (!currentTrack || !playing) {
+      discordRPC.clearActivity();
+      return;
+    }
+
+    const startTimestamp =
+      Math.floor(Date.now() / 1000) - Math.floor(progress);
+
+    const endTimestamp =
+      startTimestamp + Math.floor(duration);
+
+    discordRPC.setActivity({
+      title: currentTrack.title,
+      artist: currentTrack.artist,
+      startTimestamp,
+      endTimestamp,
+      paused: !playing
+    });
+  }, [
+    currentTrack,
+    playing,
+    duration
+  ]);
+  
+  useEffect(() => {
+    if (!currentTrack || !playing || !duration) return;
+
+    const interval = setInterval(() => {
+      const startTimestamp =
+        Math.floor(Date.now() / 1000) - Math.floor(progress);
+
+      const endTimestamp =
+        startTimestamp + Math.floor(duration);
+
+      discordRPC.setActivity({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+
+        startTimestamp:
+          Math.floor(
+            (Date.now() - progress * 1000) / 1000
+          ),
+
+        endTimestamp:
+          Math.floor(
+            (Date.now() + (duration - progress) * 1000) / 1000
+          ),
+
+        paused: !playing
+      });
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [
+    currentTrack,
+    playing,
+    progress,
+    duration
+  ]);
   useEffect(() => {
     loadAllTracks();
     loadPlaylists();
@@ -173,6 +239,14 @@ export default function App() {
           setAudioLoading(false);
           setDuration(sound.duration());
           setPlaying(true);
+          discordRPC.setActivity({
+          title: nextTrack?.title,
+          artist: nextTrack?.artist,
+          startTimestamp: Date.now(),
+          endTimestamp:
+            Date.now() + sound.duration() * 1000,
+          paused: false
+        });
 
           progressInterval = setInterval(() => {
             if (sound && sound.playing()) {
@@ -341,22 +415,67 @@ export default function App() {
   // ── Play / Pause (bullet‑proof) ──
   const togglePlay = useCallback(() => {
     if (!currentSound) return;
+
     if (currentSound.playing()) {
       currentSound.pause();
       setPlaying(false);
+
+      if (currentTrack) {
+        discordRPC.setActivity({
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          paused: true
+        });
+      }
     } else {
       resumeAudioContext();
       currentSound.play();
       setPlaying(true);
+
+      if (currentTrack) {
+        const startTimestamp =
+          Date.now() - progress * 1000;
+
+        const endTimestamp =
+          startTimestamp + duration * 1000;
+
+        discordRPC.setActivity({
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          startTimestamp,
+          endTimestamp,
+          paused: false
+        });
+      }
     }
-  }, []);
+  }, [
+    currentTrack,
+    progress,
+    duration
+  ]);
 
   const seek = useCallback((sec) => {
     if (currentSound) {
       currentSound.seek(sec);
       setProgress(sec);
+
+      if (currentTrack && playing) {
+        const startTimestamp =
+          Math.floor(Date.now() / 1000) - Math.floor(sec);
+
+        const endTimestamp =
+          startTimestamp + Math.floor(duration);
+
+        discordRPC.setActivity({
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          startTimestamp,
+          endTimestamp,
+          paused: false
+        });
+      }
     }
-  }, []);
+  }, [currentTrack, playing, duration]);
 
   const toggleLyrics = useCallback(() => {
     if (!currentTrack) return;
