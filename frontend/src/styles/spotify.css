@@ -1110,6 +1110,8 @@ body {
   transition: opacity 180ms linear;
 
   border-radius: inherit;
+  will-change: opacity;
+  transform: translateZ(0);
 }
 
 @keyframes lyrics-dot-breathe {
