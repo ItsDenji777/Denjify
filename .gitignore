@@ -1,4 +1,5 @@
 /backend/cache/lyrics
+/backend/cache/cover_cache.json
 /backend/covers
 /backend/node_modules
 /frontend/node_modules

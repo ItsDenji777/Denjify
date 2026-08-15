@@ -9,4 +9,6 @@ export default {
   },
   port: process.env.PORT || 9045,
   musicLibraryRoot: process.env.MUSIC_LIBRARY_ROOT || null, // if set, restrict scan paths to this root
+ discordClientId: '1510625208825020467',
+ imgbbApiKey: 'YOUR_IMGBBAPIKEY'
 };

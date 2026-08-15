@@ -9,6 +9,11 @@ router.get('/', async (req, res, next) => {
     // Fetch all playlists
     const [playlists] = await pool.query('SELECT * FROM playlists ORDER BY created_at DESC');
 
+    // ✅ FIX: If no playlists exist, return an empty array immediately
+    if (playlists.length === 0) {
+      return res.json([]);
+    }
+
     // Get total track counts for all playlists in one query
     const [counts] = await pool.query(
       `SELECT playlist_id, COUNT(*) AS total 
