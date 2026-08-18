@@ -1,7 +1,9 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import TrackList from './TrackList.jsx';
+import AddTracksModal from './AddTracksModal.jsx';
+import AddFolderModal from './AddFolderModal.jsx';
+
 import {
-  addFolderToPlaylist,
   removeTracksFromPlaylist,
   updatePlaylist,
 } from '../services/api.js';
@@ -10,9 +12,9 @@ import {
   FaPause,
   FaShuffle,
   FaMagnifyingGlass,
+  FaPlus,
 } from 'react-icons/fa6';
 
-// In‑memory cache for dominant colors
 const COLOR_CACHE = {};
 
 export default function PlaylistView({
@@ -23,12 +25,13 @@ export default function PlaylistView({
   onRefresh,
   currentTrackId,
   setPlayingPlaylistId,
-  playingPlaylistId,     // new – which playlist is playing
-  playing,               // new – global playing state
-  togglePlay,            // new – global pause/resume
+  playingPlaylistId,
+  playing,
+  togglePlay,
 }) {
-  const [folderPath, setFolderPath] = useState('');
-  const [showFolderInput, setShowFolderInput] = useState(false);
+  const [showAddTracksModal, setShowAddTracksModal] = useState(false);
+  const [showAddFolderModal, setShowAddFolderModal] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
   const [showCoverInput, setShowCoverInput] = useState(false);
   const [newCoverUrl, setNewCoverUrl] = useState('');
   const [uploadedCover, setUploadedCover] = useState('');
@@ -36,12 +39,12 @@ export default function PlaylistView({
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [colorLoading, setColorLoading] = useState(true);
-
+  const [dropdownPosition, setDropdownPosition] = useState({ left: 0, top: 0 });
+  const buttonRef = useRef(null);
   const canvasRef = useRef(document.createElement('canvas'));
 
   const tracks = playlist.tracks || [];
 
-  // Filter tracks based on search query
   const filteredTracks = useMemo(() => {
     if (!searchQuery.trim()) return tracks;
     const q = searchQuery.toLowerCase();
@@ -60,7 +63,8 @@ export default function PlaylistView({
     return hrs > 0 ? `${hrs} hr ${mins} min` : `${mins} min`;
   }, [filteredTracks]);
 
-  // Extract dominant color from cover, with caching
+  const playlistTrackIds = useMemo(() => new Set(tracks.map(t => t.id)), [tracks]);
+  
   useEffect(() => {
     const coverSrc = playlist.cover_url;
     if (!coverSrc) {
@@ -99,6 +103,46 @@ export default function PlaylistView({
     };
   }, [playlist.cover_url]);
 
+  const updateDropdownPosition = useCallback(() => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        left: rect.left,
+        top: rect.bottom + 4,
+      });
+    }
+  }, []);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (buttonRef.current && !buttonRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Update position on scroll/resize when dropdown is open
+  useEffect(() => {
+    if (!showDropdown) return;
+    updateDropdownPosition();
+    const handler = () => updateDropdownPosition();
+    window.addEventListener('scroll', handler, true);
+    window.addEventListener('resize', handler);
+    return () => {
+      window.removeEventListener('scroll', handler, true);
+      window.removeEventListener('resize', handler);
+    };
+  }, [showDropdown, updateDropdownPosition]);
+
+  const handleAddClick = () => {
+    // Update position synchronously before showing
+    updateDropdownPosition();
+    setShowDropdown(!showDropdown);
+  };
+
   const headerBg = colorLoading
     ? '#181818'
     : dominantColor || playlist.cover_color || '#1db954';
@@ -108,21 +152,7 @@ export default function PlaylistView({
     transition: 'background 0.3s ease',
   };
 
-  // ── New: is this playlist currently playing? ──
   const isThisPlaying = playing && playingPlaylistId === playlist.id;
-
-  const handleAddFolder = async () => {
-    if (!folderPath.trim()) return;
-    try {
-      const res = await addFolderToPlaylist(playlist.id, folderPath.trim());
-      alert(`Added ${res.added} tracks.`);
-      onRefresh();
-    } catch (err) {
-      alert('Error: ' + err.message);
-    }
-    setShowFolderInput(false);
-    setFolderPath('');
-  };
 
   const handleCoverChange = async () => {
     const coverUrl = uploadedCover || newCoverUrl.trim();
@@ -146,12 +176,11 @@ export default function PlaylistView({
     reader.readAsDataURL(file);
   };
 
-  // ── New: play / pause toggle ──
   const handlePlayPause = () => {
     if (isThisPlaying) {
-      togglePlay();                     // pause the current playback
+      togglePlay();
     } else {
-      playAll();                        // start playing this playlist
+      playAll();
     }
   };
 
@@ -194,7 +223,6 @@ export default function PlaylistView({
             {filteredTracks.length} songs{searchQuery ? ` (filtered from ${tracks.length})` : ''}, {totalDuration}
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            {/* Play / Pause button */}
             <button
               onClick={handlePlayPause}
               style={{
@@ -224,7 +252,6 @@ export default function PlaylistView({
               )}
             </button>
 
-            {/* Shuffle button */}
             <button onClick={shufflePlay} style={{
               background: 'transparent', border: '1px solid #b3b3b3', color: '#fff',
               padding: '8px 24px', borderRadius: 20, cursor: 'pointer', fontSize: 14,
@@ -233,7 +260,6 @@ export default function PlaylistView({
               <FaShuffle size={14} color="#fff" /> Shuffle
             </button>
 
-            {/* Search toggle */}
             <button onClick={() => setShowSearch(!showSearch)} title="Search in playlist" style={{
               background: 'transparent', border: '1px solid transparent', color: '#b3b3b3',
               cursor: 'pointer', fontSize: 18, padding: 8, borderRadius: '50%',
@@ -247,12 +273,80 @@ export default function PlaylistView({
         </div>
       </div>
 
-      {/* Controls + search bar */}
+      {/* Controls */}
       <div style={{ padding: '0 24px', display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
-        <button onClick={() => setShowFolderInput(!showFolderInput)}
-          style={{ background: 'none', border: '1px solid #535353', color: '#b3b3b3', borderRadius: 4, padding: '6px 12px', cursor: 'pointer' }}>
-          Add folder
-        </button>
+        <div style={{ position: 'relative' }} ref={buttonRef}>
+          <button
+            onClick={handleAddClick}
+            style={{
+              background: 'none',
+              border: '1px solid #535353',
+              color: '#b3b3b3',
+              borderRadius: 4,
+              padding: '6px 12px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <FaPlus size={12} /> Add
+          </button>
+          {showDropdown && (
+            <div
+              style={{
+                position: 'fixed',
+                left: dropdownPosition.left,
+                top: dropdownPosition.top,
+                zIndex: 1000,
+              }}
+            >
+              <div style={{
+                background: '#282828',
+                borderRadius: 4,
+                padding: '4px 0',
+                minWidth: 160,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+              }}>
+                <div
+                  style={{
+                    padding: '8px 16px',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#3e3e3e'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  onClick={() => {
+                    setShowDropdown(false);
+                    setShowAddTracksModal(true);
+                  }}
+                >
+                  Add tracks
+                </div>
+                <div
+                  style={{
+                    padding: '8px 16px',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#3e3e3e'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  onClick={() => {
+                    setShowDropdown(false);
+                    setShowAddFolderModal(true);
+                  }}
+                >
+                  Add from folder
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         <button onClick={() => setShowCoverInput(!showCoverInput)}
           style={{ background: 'none', border: '1px solid #535353', color: '#b3b3b3', borderRadius: 4, padding: '6px 12px', cursor: 'pointer' }}>
           Change cover
@@ -271,15 +365,6 @@ export default function PlaylistView({
             }} />
         )}
       </div>
-
-      {showFolderInput && (
-        <div style={{ padding: '0 24px', marginBottom: 16 }}>
-          <input type="text" placeholder="Folder path" value={folderPath}
-            onChange={e => setFolderPath(e.target.value)}
-            style={{ width: '100%', padding: 8, marginBottom: 8, background: '#121212', border: '1px solid #535353', borderRadius: 4, color: '#fff' }} />
-          <button onClick={handleAddFolder} style={{ background: '#1db954', border: 'none', color: '#000', fontWeight: 700, padding: '6px 16px', borderRadius: 4, cursor: 'pointer' }}>Add</button>
-        </div>
-      )}
 
       {showCoverInput && (
         <div style={{ padding: '0 24px', marginBottom: 16 }}>
@@ -315,6 +400,30 @@ export default function PlaylistView({
           currentTrackId={currentTrackId}
         />
       </div>
+
+      {/* Modals */}
+      {showAddTracksModal && (
+        <AddTracksModal
+          playlistId={playlist.id}
+          playlistTrackIds={playlistTrackIds}
+          onClose={() => setShowAddTracksModal(false)}
+          onSuccess={() => {
+            setShowAddTracksModal(false);
+            onRefresh();
+          }}
+        />
+      )}
+      {showAddFolderModal && (
+        <AddFolderModal
+          playlistId={playlist.id}
+          playlistTrackIds={playlistTrackIds}
+          onClose={() => setShowAddFolderModal(false)}
+          onSuccess={() => {
+            setShowAddFolderModal(false);
+            onRefresh();
+          }}
+        />
+      )}
     </div>
   );
 }

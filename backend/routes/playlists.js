@@ -1,21 +1,19 @@
 import { Router } from 'express';
-import pool from '../db/connection.js';
+import db from '../db/connection.js';
 
 const router = Router();
 
-// GET all playlists (with first 5 tracks preview + total track count)
+function normalizePath(p) {
+  return p.replace(/\\/g, '/');
+}
+
 router.get('/', async (req, res, next) => {
   try {
-    // Fetch all playlists
-    const [playlists] = await pool.query('SELECT * FROM playlists ORDER BY created_at DESC');
+    const [playlists] = await db.query('SELECT * FROM playlists ORDER BY created_at DESC');
 
-    // ✅ FIX: If no playlists exist, return an empty array immediately
-    if (playlists.length === 0) {
-      return res.json([]);
-    }
+    if (playlists.length === 0) return res.json([]);
 
-    // Get total track counts for all playlists in one query
-    const [counts] = await pool.query(
+    const [counts] = await db.query(
       `SELECT playlist_id, COUNT(*) AS total 
        FROM playlist_tracks 
        WHERE playlist_id IN (${playlists.map(() => '?').join(',')}) 
@@ -23,21 +21,18 @@ router.get('/', async (req, res, next) => {
       playlists.map(p => p.id)
     );
 
-    // Map of playlist_id -> total count
     const countMap = {};
     counts.forEach(row => { countMap[row.playlist_id] = row.total; });
 
-    // Attach preview tracks and total count to each playlist
     for (const pl of playlists) {
-      pl.trackCount = countMap[pl.id] || 0;   // total tracks
-
-      // Still fetch preview tracks (first 5) for any display
-      const [tracks] = await pool.query(
+      pl.trackCount = countMap[pl.id] || 0;
+      const [tracks] = await db.query(
         `SELECT t.id, t.title, t.artist, t.album, t.duration_seconds, t.cover_art_url
          FROM playlist_tracks pt JOIN tracks t ON pt.track_id = t.id
          WHERE pt.playlist_id = ?
          ORDER BY pt.position
-         LIMIT 5`, [pl.id]
+         LIMIT 5`,
+        [pl.id]
       );
       pl.preview_tracks = tracks;
     }
@@ -48,15 +43,15 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// GET single playlist with all tracks
 router.get('/:id/tracks', async (req, res, next) => {
   try {
-    const [playlist] = await pool.query('SELECT * FROM playlists WHERE id = ?', [req.params.id]);
+    const [playlist] = await db.query('SELECT * FROM playlists WHERE id = ?', [req.params.id]);
     if (playlist.length === 0) return res.status(404).json({ error: 'Playlist not found' });
 
-    const [tracks] = await pool.query(
+    const [tracks] = await db.query(
       `SELECT t.*, pt.position FROM playlist_tracks pt JOIN tracks t ON pt.track_id = t.id
-       WHERE pt.playlist_id = ? ORDER BY pt.position`, [req.params.id]
+       WHERE pt.playlist_id = ? ORDER BY pt.position`,
+      [req.params.id]
     );
     res.json({ ...playlist[0], tracks });
   } catch (err) {
@@ -64,23 +59,21 @@ router.get('/:id/tracks', async (req, res, next) => {
   }
 });
 
-// Create playlist
 router.post('/', async (req, res, next) => {
   try {
     const { name, description, cover_color, cover_url } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
     const color = cover_color || '#1db954';
-    const [result] = await pool.query(
+    const result = await db.run(
       'INSERT INTO playlists (name, description, cover_color, cover_url) VALUES (?, ?, ?, ?)',
       [name, description || null, color, cover_url || null]
     );
-    res.status(201).json({ id: result.insertId, name, description, cover_color: color, cover_url });
+    res.status(201).json({ id: result.lastID, name, description, cover_color: color, cover_url });
   } catch (err) {
     next(err);
   }
 });
 
-// Update playlist (supports partial updates)
 router.put('/:id', async (req, res, next) => {
   try {
     const allowed = ['name', 'description', 'cover_color', 'cover_url'];
@@ -99,7 +92,7 @@ router.put('/:id', async (req, res, next) => {
     }
 
     values.push(req.params.id);
-    await pool.query(
+    await db.run(
       `UPDATE playlists SET ${fields.join(', ')} WHERE id = ?`,
       values
     );
@@ -109,17 +102,15 @@ router.put('/:id', async (req, res, next) => {
   }
 });
 
-// Delete playlist
 router.delete('/:id', async (req, res, next) => {
   try {
-    await pool.query('DELETE FROM playlists WHERE id = ?', [req.params.id]);
+    await db.run('DELETE FROM playlists WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     next(err);
   }
 });
 
-// Add tracks to playlist
 router.post('/:id/tracks', async (req, res, next) => {
   try {
     const { trackIds, position } = req.body;
@@ -128,127 +119,156 @@ router.post('/:id/tracks', async (req, res, next) => {
     }
 
     let pos = position != null ? parseInt(position) : null;
-    const conn = await pool.getConnection();
-    try {
-      await conn.beginTransaction();
 
+    await db.beginTransaction();
+    try {
       if (pos == null) {
-        const [max] = await conn.query(
+        const row = await db.get(
           'SELECT COALESCE(MAX(position), -1) + 1 AS nextPos FROM playlist_tracks WHERE playlist_id = ?',
           [req.params.id]
         );
-        pos = max[0].nextPos;
+        pos = row.nextPos || 0;
       } else {
-        await conn.query(
+        await db.run(
           'UPDATE playlist_tracks SET position = position + ? WHERE playlist_id = ? AND position >= ?',
           [trackIds.length, req.params.id, pos]
         );
       }
 
       for (let i = 0; i < trackIds.length; i++) {
-        await conn.query(
-          'INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE position = VALUES(position)',
+        await db.run(
+          'INSERT OR REPLACE INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)',
           [req.params.id, trackIds[i], pos + i]
         );
       }
-      await conn.commit();
+
+      await db.commit();
       res.json({ success: true });
     } catch (err) {
-      await conn.rollback();
+      await db.rollback();
       throw err;
-    } finally {
-      conn.release();
     }
   } catch (err) {
     next(err);
   }
 });
 
-// Remove tracks from playlist
 router.delete('/:id/tracks', async (req, res, next) => {
   try {
     const { trackIds } = req.body;
-    if (!trackIds || !Array.isArray(trackIds)) return res.status(400).json({ error: 'trackIds array required' });
+    if (!trackIds || !Array.isArray(trackIds)) {
+      return res.status(400).json({ error: 'trackIds array required' });
+    }
 
-    const conn = await pool.getConnection();
+    await db.beginTransaction();
     try {
-      await conn.beginTransaction();
-      await conn.query('DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id IN (?)', [req.params.id, trackIds]);
-      await conn.query('SET @pos = -1');
-      await conn.query('UPDATE playlist_tracks SET position = (@pos := @pos + 1) WHERE playlist_id = ? ORDER BY position', [req.params.id]);
-      await conn.commit();
+      const placeholders = trackIds.map(() => '?').join(',');
+      await db.run(
+        `DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id IN (${placeholders})`,
+        [req.params.id, ...trackIds]
+      );
+
+      // Reorder positions
+      await db.run(
+        `UPDATE playlist_tracks SET position = (
+          SELECT new_pos FROM (
+            SELECT row_number() OVER (ORDER BY position) - 1 AS new_pos, rowid
+            FROM playlist_tracks
+            WHERE playlist_id = ?
+          ) WHERE rowid = playlist_tracks.rowid
+        ) WHERE playlist_id = ?`,
+        [req.params.id, req.params.id]
+      );
+
+      await db.commit();
       res.json({ success: true });
     } catch (err) {
-      await conn.rollback();
+      await db.rollback();
       throw err;
-    } finally {
-      conn.release();
     }
   } catch (err) {
     next(err);
   }
 });
 
-// Reorder track within playlist
 router.put('/:id/tracks/reorder', async (req, res, next) => {
   try {
     const { trackId, newPosition } = req.body;
-    if (trackId == null || newPosition == null) return res.status(400).json({ error: 'trackId and newPosition required' });
+    if (trackId == null || newPosition == null) {
+      return res.status(400).json({ error: 'trackId and newPosition required' });
+    }
 
-    const conn = await pool.getConnection();
+    await db.beginTransaction();
     try {
-      await conn.beginTransaction();
-      await conn.query('DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?', [req.params.id, trackId]);
-      await conn.query('UPDATE playlist_tracks SET position = position + 1 WHERE playlist_id = ? AND position >= ?', [req.params.id, newPosition]);
-      await conn.query('INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)', [req.params.id, trackId, newPosition]);
-      await conn.query('SET @pos = -1');
-      await conn.query('UPDATE playlist_tracks SET position = (@pos := @pos + 1) WHERE playlist_id = ? ORDER BY position', [req.params.id]);
-      await conn.commit();
+      await db.run('DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?', [req.params.id, trackId]);
+      await db.run(
+        'UPDATE playlist_tracks SET position = position + 1 WHERE playlist_id = ? AND position >= ?',
+        [req.params.id, newPosition]
+      );
+      await db.run(
+        'INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)',
+        [req.params.id, trackId, newPosition]
+      );
+      await db.run(
+        `UPDATE playlist_tracks SET position = (
+          SELECT new_pos FROM (
+            SELECT row_number() OVER (ORDER BY position) - 1 AS new_pos, rowid
+            FROM playlist_tracks
+            WHERE playlist_id = ?
+          ) WHERE rowid = playlist_tracks.rowid
+        ) WHERE playlist_id = ?`,
+        [req.params.id, req.params.id]
+      );
+      await db.commit();
       res.json({ success: true });
     } catch (err) {
-      await conn.rollback();
+      await db.rollback();
       throw err;
-    } finally {
-      conn.release();
     }
   } catch (err) {
     next(err);
   }
 });
 
-// Add entire folder to playlist
 router.post('/:id/add-folder', async (req, res, next) => {
   try {
-    let { folderPath } = req.body;
+    const folderPath = normalizePath(req.body.folderPath);
     if (!folderPath) return res.status(400).json({ error: 'folderPath required' });
-    folderPath = folderPath.replace(/\\/g, '\\\\');
-    const [tracks] = await pool.query(
+
+    const [tracks] = await db.query(
       'SELECT id FROM tracks WHERE file_path LIKE ?',
       [`${folderPath}%`]
     );
+
     if (tracks.length === 0) return res.json({ added: 0 });
+
     const trackIds = tracks.map(t => t.id);
-    const conn = await pool.getConnection();
+
+    await db.beginTransaction();
     try {
-      await conn.beginTransaction();
-      const [max] = await conn.query(
+      const row = await db.get(
         'SELECT COALESCE(MAX(position), -1) + 1 AS nextPos FROM playlist_tracks WHERE playlist_id = ?',
         [req.params.id]
       );
-      let pos = max[0].nextPos;
+      let pos = row.nextPos || 0;
       for (const tid of trackIds) {
-        await conn.query(
-          'INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE position = position',
+        await db.run(
+          'INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)',
           [req.params.id, tid, pos++]
         );
       }
-      await conn.commit();
+
+      // Store folder association for auto-add on new files
+      await db.run(
+        'INSERT OR IGNORE INTO playlist_folders (playlist_id, folder_path) VALUES (?, ?)',
+        [req.params.id, folderPath]
+      );
+
+      await db.commit();
       res.json({ added: trackIds.length });
     } catch (err) {
-      await conn.rollback();
+      await db.rollback();
       throw err;
-    } finally {
-      conn.release();
     }
   } catch (err) {
     next(err);

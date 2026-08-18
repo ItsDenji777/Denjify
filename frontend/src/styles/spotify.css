@@ -1114,6 +1114,79 @@ body {
   transform: translateZ(0);
 }
 
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  background: #282828;
+  border-radius: 8px;
+  padding: 6px 0;
+  min-width: 180px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.context-menu-item {
+  padding: 10px 20px;
+  color: #e0e0e0;
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.context-menu-item:hover {
+  background: #3e3e3e;
+  color: #ffffff;
+}
+
+.context-menu-item:active {
+  background: #1db954;
+  color: #000;
+}
+
+.context-menu-item + .context-menu-item {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal-content {
+  background: #1e1e1e;
+  padding: 24px;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 @keyframes lyrics-dot-breathe {
   0% {
     transform: scale(1);

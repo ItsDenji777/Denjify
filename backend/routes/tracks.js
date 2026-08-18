@@ -1,9 +1,7 @@
 import { Router } from 'express';
-import pool from '../db/connection.js';
+import db from '../db/connection.js';
 import fs from 'fs';
 import path from 'path';
-import mime from 'mime-types'; // we'll need to install mime-types
-// Actually we'll just use a manual mapping to avoid extra dependency.
 
 const router = Router();
 
@@ -21,7 +19,7 @@ function getContentType(filePath) {
   return MIME_MAP[ext] || 'application/octet-stream';
 }
 
-// GET /api/tracks?limit=50&offset=0&q=search
+// GET /api/tracks
 router.get('/', async (req, res, next) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
@@ -38,8 +36,23 @@ router.get('/', async (req, res, next) => {
     query += ' ORDER BY album, disc_number, track_number, id LIMIT ? OFFSET ?';
     params.push(limit, offset);
 
-    const [rows] = await pool.query(query, params);
+    const [rows] = await db.query(query, params);
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/tracks/folders - unique folder paths
+router.get('/folders', async (req, res, next) => {
+  try {
+    const [rows] = await db.query('SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path != ""');
+    const folders = new Set();
+    for (const row of rows) {
+      const dir = path.dirname(row.file_path);
+      if (dir) folders.add(dir);
+    }
+    res.json(Array.from(folders).sort());
   } catch (err) {
     next(err);
   }
@@ -48,7 +61,7 @@ router.get('/', async (req, res, next) => {
 // GET /api/tracks/:id
 router.get('/:id', async (req, res, next) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM tracks WHERE id = ?', [req.params.id]);
+    const [rows] = await db.query('SELECT * FROM tracks WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Track not found' });
     res.json(rows[0]);
   } catch (err) {
@@ -56,14 +69,13 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-// GET /api/tracks/:id/file - stream audio
+// GET /api/tracks/:id/file
 router.get('/:id/file', async (req, res, next) => {
   try {
-    const [rows] = await pool.query('SELECT file_path FROM tracks WHERE id = ?', [req.params.id]);
+    const [rows] = await db.query('SELECT file_path FROM tracks WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Track not found' });
 
     const filePath = rows[0].file_path;
-    // Basic security: check if file exists and is within allowed root (optional)
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'File not found on disk' });
     }

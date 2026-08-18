@@ -8,7 +8,9 @@ export default {
     connectionLimit: 10,
   },
   port: process.env.PORT || 9045,
-  musicLibraryRoot: process.env.MUSIC_LIBRARY_ROOT || null, // if set, restrict scan paths to this root
- discordClientId: '1510625208825020467',
- imgbbApiKey: 'YOUR_IMGBBAPIKEY'
+  musicLibraryRoot: process.env.MUSIC_LIBRARY_ROOT || null,
+  discordClientId: '1510625208825020467',
+  imgbbApiKey: 'YOUR_IMGBB_API_KEY',
+  watcherEnabled: false,
+  syncEnabled: false,
 };

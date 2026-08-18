@@ -4,17 +4,20 @@ import PlaylistView from './PlaylistView.jsx';
 import HomeView from './HomeView.jsx';
 import SearchView from './SearchView.jsx';
 import { fetchPlaylistTracks, scanLibrary, deletePlaylist } from '../services/api.js';
+import { FaRotate } from 'react-icons/fa6';
+
+const SYNC_ENABLED = import.meta.env.VITE_SYNC_ENABLED === 'true';
 
 export default function MainContent({
   tracks, allTracks, playlists, currentView, selectedPlaylistId, setSelectedPlaylistId,
   setCurrentView, onPlayTrack, onQueueUpdate, queue, searchQuery, setSearchQuery,
   loadAllTracks, loadPlaylists, onContextMenu, currentTrack,
   playingPlaylistId, setPlayingPlaylistId,
-  playing,          // ← NEW
-  togglePlay,       // ← NEW
+  playing, togglePlay,
 }) {
   const [scanPath, setScanPath] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [playlistData, setPlaylistData] = useState(null);
 
   // Reset playlist data when switching playlists
@@ -38,11 +41,31 @@ export default function MainContent({
     try {
       await scanLibrary(scanPath);
       await loadAllTracks();
+      alert('Scan complete!');
     } catch (err) {
       alert('Scan error: ' + err.message);
     }
     setScanning(false);
     setScanPath('');
+  };
+
+  const handleSync = async () => {
+    if (!SYNC_ENABLED) return;
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/library/sync', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        await loadAllTracks();
+        alert(`Sync complete: ${data.added} added, ${data.removed} removed`);
+      } else {
+        alert('Sync error: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Sync error: ' + err.message);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   if (currentView === 'scan') {
@@ -56,9 +79,33 @@ export default function MainContent({
             value={scanPath}
             onChange={e => setScanPath(e.target.value)}
           />
-          <button onClick={handleScan} disabled={scanning}>
-            {scanning ? 'Scanning...' : 'Scan'}
-          </button>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <button onClick={handleScan} disabled={scanning}>
+              {scanning ? 'Scanning...' : 'Scan'}
+            </button>
+            {SYNC_ENABLED && (
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                title="Sync library (add new files, remove deleted)"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#b3b3b3',
+                  cursor: 'pointer',
+                  padding: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <FaRotate
+                  size={20}
+                  className={syncing ? 'spin' : ''}
+                />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -69,7 +116,6 @@ export default function MainContent({
       return (
         <div className="main-content" style={{ padding: 0 }}>
           <div style={{ padding: 24 }}>
-            {/* Skeleton placeholder */}
             <div style={{ display: 'flex', gap: 24, marginBottom: 24 }}>
               <div style={{ width: 200, height: 200, borderRadius: 4, background: '#282828', animation: 'pulse 1.5s infinite' }} />
               <div style={{ flex: 1 }}>
@@ -115,9 +161,9 @@ export default function MainContent({
           }}
           currentTrackId={currentTrack?.id}
           setPlayingPlaylistId={setPlayingPlaylistId}
-          playingPlaylistId={playingPlaylistId}    // ← NEW
-          playing={playing}                        // ← NEW
-          togglePlay={togglePlay}                  // ← NEW
+          playingPlaylistId={playingPlaylistId}
+          playing={playing}
+          togglePlay={togglePlay}
         />
       </div>
     );

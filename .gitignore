@@ -3,3 +3,5 @@
 /backend/covers
 /backend/node_modules
 /frontend/node_modules
+/backend/db/denjify.db
+/backend/db/denjify.db-*
